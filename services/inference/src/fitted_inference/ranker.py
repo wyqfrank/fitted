@@ -116,6 +116,7 @@ class Dinov2FitRanker:
         artifact = np.load(artifact_dir / "ranker.npz")
         self._centre = np.asarray(artifact["centre"], dtype=np.float32)
         self._basis = np.asarray(artifact["basis"], dtype=np.float32)
+        self._normalize = bool(artifact["normalize"]) if "normalize" in artifact.files else True
         self._head = _load_head(artifact)
 
         if "calibration" not in artifact.files:
@@ -128,9 +129,7 @@ class Dinov2FitRanker:
 
         metadata_path = artifact_dir / "ranker.json"
         self._metadata: dict[str, Any] = (
-            json.loads(metadata_path.read_text(encoding="utf-8"))
-            if metadata_path.exists()
-            else {}
+            json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
         )
         self._display_min = display_min
         self._display_max = display_max
@@ -161,7 +160,7 @@ class Dinov2FitRanker:
             embedding = embedding.to("cpu").numpy()[0].astype(np.float32)
 
         reduced = (embedding - self._centre) @ self._basis.T
-        z = reduced / max(float(np.linalg.norm(reduced)), 1e-8)
+        z = reduced / max(float(np.linalg.norm(reduced)), 1e-8) if self._normalize else reduced
         raw = float(self._head(z))
         percentile = _percentile_of(raw, self._calibration)
         score = self._display_min + percentile * (self._display_max - self._display_min)
@@ -204,9 +203,7 @@ def _activation(name: str):
     if name == "relu":
         return lambda x: np.maximum(x, 0.0)
     if name == "gelu":
-        return lambda x: 0.5 * x * (
-            1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x**3))
-        )
+        return lambda x: 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * x**3)))
     raise RankerModelNotReadyError(f"unknown activation {name!r} in ranker.npz")
 
 

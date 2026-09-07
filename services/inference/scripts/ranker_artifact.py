@@ -44,7 +44,9 @@ def numpy_activation(name: str) -> Callable[[np.ndarray], np.ndarray]:
     raise ValueError(f"unknown activation {name!r}, expected one of {ACTIVATIONS}")
 
 
-def project(vector: np.ndarray, centre: np.ndarray, basis: np.ndarray) -> np.ndarray:
+def project(
+    vector: np.ndarray, centre: np.ndarray, basis: np.ndarray, *, normalize: bool = True
+) -> np.ndarray:
     """Centre, project, and L2-normalise a single embedding.
 
     Mirrors `train_ranker.project`, which operates on a batch; kept as a
@@ -52,6 +54,8 @@ def project(vector: np.ndarray, centre: np.ndarray, basis: np.ndarray) -> np.nda
     image at a time.
     """
     reduced = (vector - centre) @ basis.T
+    if not normalize:
+        return reduced
     norm = np.linalg.norm(reduced)
     return reduced / max(norm, 1e-8)
 
@@ -90,9 +94,7 @@ def load_calibration(artifact_dir: Path) -> np.ndarray:
     return np.sort(np.asarray(art["calibration"], dtype=np.float64))
 
 
-def load_scorer(
-    artifact_dir: Path, embeddings: dict[str, np.ndarray]
-) -> Callable[[str], float]:
+def load_scorer(artifact_dir: Path, embeddings: dict[str, np.ndarray]) -> Callable[[str], float]:
     """Build `score(image_id) -> float` from a ranker artifact.
 
     `embeddings` maps image id to its raw (pre-projection) DINOv2 vector, e.g.
@@ -101,12 +103,13 @@ def load_scorer(
     """
     art = np.load(artifact_dir / "ranker.npz")
     centre, basis = art["centre"], art["basis"]
+    normalize = bool(art["normalize"]) if "normalize" in art.files else True
 
     if "weights" in art.files:
         weights = art["weights"]
 
         def score(stem: str) -> float:
-            z = project(embeddings[stem], centre, basis)
+            z = project(embeddings[stem], centre, basis, normalize=normalize)
             return float(z @ weights)
 
     elif "w1" in art.files:
@@ -116,7 +119,7 @@ def load_scorer(
         act = numpy_activation(activation)
 
         def score(stem: str) -> float:
-            z = project(embeddings[stem], centre, basis)
+            z = project(embeddings[stem], centre, basis, normalize=normalize)
             return float(act(z @ w1.T + b1) @ w2)
 
     else:

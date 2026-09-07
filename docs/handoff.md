@@ -1,6 +1,14 @@
 # FITTED scoring — handoff
 
 Working notes for continuing the ML scoring work in a fresh session.
+**2026-09-06 correction:** The historical results and recommendations below are
+superseded where contradicted by [ranker-audit.md](ranker-audit.md). In particular,
+"384-d PCA" was 128 coordinates, inter-rater agreement is not an accuracy ceiling,
+test reuse prevents confirmatory claims, and FW supplied no training examples.
+Current implementation, commands, and development results are in
+[ranker-experiments.md](ranker-experiments.md). Historical commands below describe
+the old workflow and must not be used to overwrite the shipped artifact.
+
 Last updated 2026-08-23. Product scope lives in [`PRD.md`](PRD.md); this file
 records state, measurements, and the traps that cost time.
 

@@ -2,15 +2,14 @@
 """Train the frozen-encoder pairwise outfit ranker (PRD § ML System, Plan A).
 
     python services/inference/scripts/train_ranker.py
-    python services/inference/scripts/train_ranker.py --dims 16 --report-test
+    python services/inference/scripts/train_ranker.py --dims 16 --artifact-dir artifacts/new-run
 
 Embeds the labelling pool with a frozen DINOv2-S, reduces to a few dozen
 dimensions, and fits a linear pairwise ranker on the collected A/B decisions.
 
-The model is deliberately tiny. With ~180 images and ~420 training pairs from a
-single rater, anything with real capacity memorises the pool and tells you
-nothing. A linear head on a low-rank projection is the largest model this
-dataset can honestly support.
+The frozen encoder is a data-driven baseline for the small labelled image pool.
+Its head capacity is an experimental choice, not an established upper bound.
+See docs/ranker-audit.md for limitations of the historical capacity experiments.
 
     score(image)      = w · P(embed(image))
     P(A preferred)    = sigmoid((score(A) - score(B)) / temperature)
@@ -42,6 +41,18 @@ from ranker_artifact import (
     CALIBRATION_QUANTILES,
     load_scorer,
     numpy_activation,
+)
+from ranker_evaluation import (
+    embedding_metadata,
+    file_hash,
+    group_split,
+    load_embeddings,
+    load_manifest,
+    paired_summary,
+    partition_pairs,
+    read_jsonl,
+    validate_teacher_cache,
+    write_json,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -207,6 +218,8 @@ def embed_pool(
     batch_size: int,
     refresh: bool,
     cache_path: Path = CACHE_PATH,
+    *,
+    allow_legacy: bool = False,
 ) -> dict[str, np.ndarray]:
     """Frozen DINOv2-S embeddings, cached by image id.
 
@@ -215,8 +228,8 @@ def embed_pool(
     """
     cached: dict[str, np.ndarray] = {}
     if cache_path.exists() and not refresh:
-        with np.load(cache_path) as data:
-            cached = {key: data[key] for key in data.files}
+        cached, provenance = load_embeddings(cache_path, images, ENCODER, allow_legacy=allow_legacy)
+        print(f"embedding cache provenance: {provenance}")
 
     todo = sorted(set(images) - set(cached))
     if not todo:
@@ -262,9 +275,13 @@ def embed_pool(
             done = min(start + batch_size, len(todo))
             print(f"  {done}/{len(todo)}  ({(time.time() - started) / done:.2f}s per image)")
 
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(cache_path, **cached)
-    print(f"  cached to {cache_path.relative_to(REPO_ROOT)}")
+    metadata = embedding_metadata(images, ENCODER)
+    metadata["cacheSha256"] = file_hash(cache_path)
+    metadata["encoderRevision"] = getattr(model.config, "_commit_hash", None)
+    write_json(cache_path.with_suffix(".metadata.json"), metadata)
+    print(f"  cached to {cache_path}")
     return {stem: cached[stem] for stem in images}
 
 
@@ -273,20 +290,34 @@ def embed_pool(
 # --------------------------------------------------------------------------
 
 
-def fit_projection(train_vectors: np.ndarray, dims: int) -> tuple[np.ndarray, np.ndarray]:
+def fit_projection(
+    train_vectors: np.ndarray, dims: int, *, mode: str = "pca"
+) -> tuple[np.ndarray, np.ndarray]:
     """PCA basis fitted on training images only.
 
     Fitting on the whole pool would leak held-out images into the
     representation and inflate the test number.
     """
+    if train_vectors.ndim != 2 or not len(train_vectors) or dims < 1:
+        raise ValueError("Projection needs nonempty training vectors and positive dimensions")
+    if not np.isfinite(train_vectors).all():
+        raise ValueError("Projection vectors must be finite")
     centre = train_vectors.mean(axis=0)
+    if mode == "identity":
+        return centre, np.eye(train_vectors.shape[1], dtype=train_vectors.dtype)
+    if mode != "pca":
+        raise ValueError(f"Unknown projection mode: {mode}")
     _, _, vt = np.linalg.svd(train_vectors - centre, full_matrices=False)
     return centre, vt[:dims]
 
 
-def project(vectors: np.ndarray, centre: np.ndarray, basis: np.ndarray) -> np.ndarray:
+def project(
+    vectors: np.ndarray, centre: np.ndarray, basis: np.ndarray, *, normalize: bool = True
+) -> np.ndarray:
     """Centre, project, and L2-normalise so the ranker sees a bounded scale."""
     reduced = (vectors - centre) @ basis.T
+    if not normalize:
+        return reduced
     norms = np.linalg.norm(reduced, axis=1, keepdims=True)
     return reduced / np.maximum(norms, 1e-8)
 
@@ -343,16 +374,11 @@ def fit_head(
     give seed-dependent, occasionally divergent results; full-batch Adam is
     steadier and the dataset is tiny enough that minibatching buys nothing.
 
-    `activation` matters more than it looks. tanh is linear near the origin,
-    so an L2 penalty anchoring w1 towards zero (or towards a teacher prior
-    fitted the same way) can shrink pre-activations into that regime and
-    collapse the whole network onto a linear function — same accuracy, for
-    the boring reason that it computed the same thing. relu and gelu have no
-    such regime: their kink sits at a fixed point in *input* space, not at a
-    weight scale, so shrinking w1 cannot linearise them away. For that reason
-    w1/b1 are excluded from the proximal penalty below (see `penalty`) —
-    only w2 is still anchored, which is enough to keep the teacher-pretrain
-    -> human-fine-tune mechanism intact.
+    The MLP branch preserves the historical output-only penalty for reproduction.
+    It does not adequately constrain the whole function: ReLU permits rescaling
+    w1 and w2 without changing predictions. Both tanh and GELU are approximately
+    linear near zero. These recipes cannot rule out nonlinear capacity; use a
+    separately controlled experiment before interpreting their performance.
     """
     import torch
 
@@ -467,9 +493,10 @@ def fit_best_of_seeds(
     Only the mlp branch actually varies with seed: LBFGS on the linear head
     is a deterministic convex fit from a fixed starting point, so every
     restart returns identical weights and this is a single fit in disguise.
-    Selection uses the human validation split throughout (never the teacher
-    held-out split, even when fitting the teacher prior) so the number this
-    experiment reports is never also the number used to pick the model.
+    Selection uses the supplied validation arrays: teacher validation for the
+    teacher prior, human validation for human fine-tuning. The reported selected
+    validation score is exploratory, not an independent generalisation estimate.
+    With a fixed prior, MLP fine-tuning restarts share the same initial weights.
     """
     candidate_seeds = range(seeds) if head == "mlp" else (0,)
     best_params: dict[str, np.ndarray] | None = None
@@ -477,8 +504,15 @@ def fit_best_of_seeds(
     best_seed = 0
     for seed in candidate_seeds:
         params = fit_head(
-            z_left, z_right, y, l2,
-            head=head, hidden=hidden, activation=activation, prior=prior, seed=seed,
+            z_left,
+            z_right,
+            y,
+            l2,
+            head=head,
+            hidden=hidden,
+            activation=activation,
+            prior=prior,
+            seed=seed,
         )
         scorer = make_scorer(params, head, activation)
         score, _ = accuracy(select_left, select_right, select_y, scorer)
@@ -544,9 +578,7 @@ def collapse_diagnostic(
     return result
 
 
-def accuracy(
-    z_left: np.ndarray, z_right: np.ndarray, y: np.ndarray, scorer
-) -> tuple[float, int]:
+def accuracy(z_left: np.ndarray, z_right: np.ndarray, y: np.ndarray, scorer) -> tuple[float, int]:
     """Agreement on decided pairs. Ties are excluded — neither side is correct."""
     decided = y != 0.5
     if not decided.any():
@@ -604,26 +636,32 @@ def build_pairs(
 
 
 def teacher_split(
-    comparisons: list[Comparison], holdout: float
+    comparisons: list[Comparison], holdout: float, *, mode: str = "image"
 ) -> tuple[list[Comparison], list[Comparison]]:
-    """Deterministic train/held-out split of teacher pairs.
+    """Image-disjoint development split; crossing pairs are discarded.
 
-    Hashed on the pair id rather than shuffled, so the split is stable across
-    runs and independent of file order — two runs made minutes apart, or
-    after teacher.jsonl has grown, still hold out the same pairs.
+    ``mode='pair'`` exists only to reproduce historical exploratory runs.
+    A supplied evaluation manifest is preferable for verified subject grouping.
     """
     import hashlib
 
     train: list[Comparison] = []
     held: list[Comparison] = []
+    if not 0 <= holdout < 1 or mode not in {"image", "pair"}:
+        raise ValueError("Expected holdout in [0, 1) and image/pair split mode")
     for c in comparisons:
-        digest = hashlib.sha256(f"{c.left}|{c.right}".encode()).digest()
-        bucket = digest[0] / 256.0  # deterministic pseudo-uniform in [0, 1)
-        (held if bucket < holdout else train).append(c)
+        if mode == "pair":
+            left, right = sorted((c.left, c.right))
+            digest = hashlib.sha256(f"{left}|{right}".encode()).digest()
+            (held if digest[0] / 256.0 < holdout else train).append(c)
+        else:
+            a, b = (group_split(i, val=holdout, test=0) for i in (c.left, c.right))
+            if a == b:
+                (train if a == "train" else held).append(c)
     return train, held
 
 
-def load_teacher(path: Path, tie_margin: float) -> list[Comparison]:
+def load_teacher(path: Path, tie_margin: float, *, allow_legacy: bool = False) -> list[Comparison]:
     """VLM teacher preferences from distil_teacher.py.
 
     The teacher emits a continuous score margin. Anything inside `tie_margin`
@@ -634,12 +672,20 @@ def load_teacher(path: Path, tie_margin: float) -> list[Comparison]:
     if not path.exists():
         sys.exit(f"No teacher labels at {path}. Run distil_teacher.py first.")
 
+    if not np.isfinite(tie_margin) or tie_margin < 0:
+        raise ValueError("Tie margin must be finite and nonnegative")
+    rows = read_jsonl(path)
+    expected = next((r["provenance"] for r in rows if "provenance" in r), {})
+    provenance = validate_teacher_cache(rows, expected, allow_legacy=allow_legacy)
+    print(f"teacher label provenance: {provenance}")
     out: list[Comparison] = []
     ties = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
+    seen = set()
+    for row in rows:
+        key = tuple(sorted((row["leftId"], row["rightId"])))
+        if key[0] == key[1] or key in seen:
+            raise ValueError(f"Duplicate, reversed or self teacher pair: {key}")
+        seen.add(key)
         margin = row["margin"]
         if abs(margin) < tie_margin:
             label = 0.5
@@ -669,6 +715,16 @@ def resolve_teacher_images(comparisons: list[Comparison], pool: Path) -> dict[st
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dims", type=int, default=32, help="PCA dimensions (default: 32)")
+    parser.add_argument("--basis", choices=("pca", "identity"), default="pca")
+    parser.add_argument("--normalize", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--allow-legacy-cache",
+        action="store_true",
+        help="explicitly reuse unversioned embeddings for exploratory runs",
+    )
+    parser.add_argument("--manifest", type=Path, help="frozen evaluation manifest")
+    parser.add_argument("--teacher-split", choices=("image", "pair"), default="image")
+    parser.add_argument("--teacher-l2", type=float, default=0.01)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--refresh", action="store_true", help="recompute cached embeddings")
     parser.add_argument(
@@ -737,8 +793,8 @@ def main() -> None:
         "--teacher-holdout",
         type=float,
         default=0.2,
-        help="fraction of teacher pairs held out of pretraining, to measure "
-        "teacher fit honestly instead of in-sample (default: 0.2)",
+        help="fraction of teacher images held for development (default: 0.2); "
+        "cross-split pairs are dropped. A manifest overrides this split.",
     )
     parser.add_argument(
         "--seeds",
@@ -750,21 +806,40 @@ def main() -> None:
     parser.add_argument(
         "--artifact-dir",
         type=Path,
-        default=ARTIFACT_DIR,
-        help="where to write ranker.npz / ranker.json (default: models/ranker, "
-        "the shipped location — point elsewhere for experiment runs)",
+        default=REPO_ROOT / "artifacts" / "ranker-training",
+        help="new experiment output directory (default: artifacts/ranker-training)",
     )
     args = parser.parse_args()
+    if args.artifact_dir.resolve() == ARTIFACT_DIR.resolve():
+        parser.error(
+            "Train into an experiment directory; promote artifacts separately after validation"
+        )
+    if (args.artifact_dir / "ranker.npz").exists():
+        parser.error("Artifact already exists; use a new experiment directory")
+    manifest = load_manifest(args.manifest, verify_files=True) if args.manifest else None
+    if args.teacher and manifest is None and args.teacher_split != "pair":
+        parser.error("Teacher training requires --manifest; --teacher-split pair is legacy-only")
 
     selected = (
-        {r.strip().upper() for r in args.raters.split(",") if r.strip()}
-        if args.raters
-        else None
+        {r.strip().upper() for r in args.raters.split(",") if r.strip()} if args.raters else None
     )
     comparisons = load_decisions(args.decisions_dir, selected)
     files = resolve_images(comparisons)
     splits = image_splits(comparisons)
-    embeddings = embed_pool(files, args.batch_size, args.refresh)
+    if manifest:
+        for stem, split in splits.items():
+            if stem not in manifest["images"] or manifest["images"][stem]["split"] != split:
+                parser.error("Human decision splits disagree with the frozen manifest")
+        for path in args.decisions_dir.glob("decisions.*.jsonl"):
+            if manifest.get("inputs", {}).get(str(path.resolve())) != file_hash(path):
+                parser.error("Human decisions are not the snapshot recorded in the manifest")
+        if args.teacher and manifest.get("inputs", {}).get(
+            str(args.teacher.resolve())
+        ) != file_hash(args.teacher):
+            parser.error("Teacher labels are not the snapshot recorded in the manifest")
+    embeddings = embed_pool(
+        files, args.batch_size, args.refresh, allow_legacy=args.allow_legacy_cache
+    )
 
     by_split = {
         name: [c for c in comparisons if c.split == name] for name in ("train", "val", "test")
@@ -781,79 +856,131 @@ def main() -> None:
     teacher_reduced: dict[str, np.ndarray] = {}
 
     if args.teacher:
-        # The teacher pool is tens of thousands of images, so it estimates the
-        # embedding manifold far better than 128 labelled photos can. Fitting
-        # the projection there is not leakage: the pools are disjoint.
-        teacher = load_teacher(args.teacher, args.tie_margin)
-        teacher_files = resolve_teacher_images(teacher, args.teacher_pool)
+        # Partition before fitting the projection. A teacher-pool basis must
+        # never consume validation/test images, even without their labels.
+        teacher = load_teacher(args.teacher, args.tie_margin, allow_legacy=args.allow_legacy_cache)
+        if manifest:
+            partitions, dropped = partition_pairs(teacher, manifest)
+            teacher_train, teacher_held = partitions["train"], partitions["val"]
+            print(f"teacher manifest: {dropped} crossing pairs dropped; test partition not scored")
+        else:
+            teacher_train, teacher_held = teacher_split(
+                teacher, args.teacher_holdout, mode=args.teacher_split
+            )
+        if not teacher_train:
+            parser.error("No teacher training pairs remain after the split")
+        teacher_files = (
+            {
+                i: Path(manifest["images"][i]["path"])
+                for c in teacher_train + teacher_held
+                for i in (c.left, c.right)
+            }
+            if manifest
+            else resolve_teacher_images(teacher, args.teacher_pool)
+        )
         teacher_embeddings = embed_pool(
-            teacher_files, args.batch_size, args.refresh, TEACHER_CACHE_PATH
+            teacher_files,
+            args.batch_size,
+            args.refresh,
+            TEACHER_CACHE_PATH,
+            allow_legacy=args.allow_legacy_cache,
         )
         if args.projection == "teacher":
-            source = np.stack(list(teacher_embeddings.values()))
+            train_ids = sorted({i for c in teacher_train for i in (c.left, c.right)})
+            source = np.stack([teacher_embeddings[i] for i in train_ids])
         else:
             train_images = sorted(image for image, split in splits.items() if split == "train")
             source = np.stack([embeddings[i] for i in train_images])
         print(f"projection fitted on {len(source)} {args.projection}-pool images")
-        centre, basis = fit_projection(source, args.dims)
+        centre, basis = fit_projection(source, args.dims, mode=args.basis)
         teacher_reduced = dict(
             zip(
                 teacher_embeddings,
-                project(np.stack(list(teacher_embeddings.values())), centre, basis),
+                project(
+                    np.stack(list(teacher_embeddings.values())),
+                    centre,
+                    basis,
+                    normalize=args.normalize,
+                ),
                 strict=True,
             )
         )
     else:
         train_images = sorted(image for image, split in splits.items() if split == "train")
-        centre, basis = fit_projection(np.stack([embeddings[i] for i in train_images]), args.dims)
+        centre, basis = fit_projection(
+            np.stack([embeddings[i] for i in train_images]), args.dims, mode=args.basis
+        )
 
-    reduced = {stem: v for stem, v in zip(
-        embeddings, project(np.stack(list(embeddings.values())), centre, basis), strict=True
-    )}
+    reduced = {
+        stem: v
+        for stem, v in zip(
+            embeddings,
+            project(np.stack(list(embeddings.values())), centre, basis, normalize=args.normalize),
+            strict=True,
+        )
+    }
 
     x_train_l, x_train_r, y_train = build_pairs(by_split["train"], reduced)
     x_val_l, x_val_r, y_val = build_pairs(by_split["val"], reduced)
 
     teacher_report = None
     if args.teacher:
-        teacher_train, teacher_held = teacher_split(teacher, args.teacher_holdout)
         tt_l, tt_r, tt_y = build_pairs(teacher_train, teacher_reduced)
         th_l, th_r, th_y = build_pairs(teacher_held, teacher_reduced)
         print(
             f"\npretraining on {len(tt_y)} teacher pairs ({args.dims} dims), "
-            f"{len(th_y)} held out for an honest fidelity check"
+            f"{len(th_y)} used for teacher validation (exploratory)"
         )
-        # Thousands of teacher pairs support a much lighter penalty than a few
-        # hundred human ones, so the pretraining step is regularised separately.
-        # Selection uses human val, never the teacher held-out set itself — the
-        # decisive number must not also be the number used to pick the model.
+        # Teacher validation selects the prior. This is explicitly a development
+        # score, not an independent test. sweep_ranker.py varies the teacher L2.
         prior, prior_seed = fit_best_of_seeds(
-            tt_l, tt_r, tt_y, 0.01,
-            head=args.head, hidden=args.hidden, activation=args.activation,
-            prior=None, seeds=args.seeds,
-            select_left=x_val_l, select_right=x_val_r, select_y=y_val,
+            tt_l,
+            tt_r,
+            tt_y,
+            args.teacher_l2,
+            head=args.head,
+            hidden=args.hidden,
+            activation=args.activation,
+            prior=None,
+            seeds=args.seeds,
+            select_left=th_l if len(th_y) else tt_l,
+            select_right=th_r if len(th_y) else tt_r,
+            select_y=th_y if len(th_y) else tt_y,
         )
         prior_scorer = make_scorer(prior, args.head, args.activation)
         teacher_accuracy, teacher_n = accuracy(tt_l, tt_r, tt_y, prior_scorer)
         teacher_held_accuracy, teacher_held_n = accuracy(th_l, th_r, th_y, prior_scorer)
-        held_low, held_high = wilson_interval(teacher_held_accuracy, teacher_held_n)
+        held_pairs = [c for c in teacher_held if c.label != 0.5]
+        held_values = [
+            float(
+                (prior_scorer(teacher_reduced[c.left]) > prior_scorer(teacher_reduced[c.right]))
+                == (c.label > 0.5)
+            )
+            for c in held_pairs
+        ]
+        held_report = paired_summary(
+            held_values,
+            [(c.left, c.right) for c in held_pairs],
+            groups={k: v["group"] for k, v in manifest["images"].items()} if manifest else None,
+        )
         zero_shot, zero_n = accuracy(x_val_l, x_val_r, y_val, prior_scorer)
         if args.head == "mlp":
             print(f"  best seed: {prior_seed}")
         print(f"  teacher fit (in-sample): {teacher_accuracy:.3f} on n={teacher_n}")
         print(
-            f"  teacher fit (held-out):  {teacher_held_accuracy:.3f}  "
-            f"95% CI [{held_low:.3f}, {held_high:.3f}]  (n={teacher_held_n})"
+            f"  teacher validation: {teacher_held_accuracy:.3f} "
+            f"group bootstrap CI {held_report['ci95']} (n={teacher_held_n}; selected)"
         )
-        print(f"  BEFORE any human label, on human val: {zero_shot:.3f} (n={zero_n})")
-        print("  That number is the honest measure of what distillation bought.")
+        print(f"  teacher-only stage, human val: {zero_shot:.3f} (n={zero_n}; exploratory)")
         teacher_report = {
             "holdout": args.teacher_holdout,
             "inSample": {"accuracy": teacher_accuracy, "n": teacher_n},
             "heldOut": {
                 "accuracy": json_number(teacher_held_accuracy),
-                "ci": [json_number(held_low), json_number(held_high)],
+                "ci": held_report["ci95"],
                 "n": teacher_held_n,
+                "usedForSelection": True,
+                "intervalMethod": "dyadic-group-product-bootstrap",
             },
             "zeroShotValAccuracy": zero_shot,
         }
@@ -865,10 +992,18 @@ def main() -> None:
     best = (None, -1.0, 0.0, 0)
     for l2 in (0.001, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0):
         params, seed = fit_best_of_seeds(
-            x_train_l, x_train_r, y_train, l2,
-            head=args.head, hidden=args.hidden, activation=args.activation,
-            prior=prior_params, seeds=args.seeds,
-            select_left=x_val_l, select_right=x_val_r, select_y=y_val,
+            x_train_l,
+            x_train_r,
+            y_train,
+            l2,
+            head=args.head,
+            hidden=args.hidden,
+            activation=args.activation,
+            prior=prior_params,
+            seeds=args.seeds,
+            select_left=x_val_l,
+            select_right=x_val_r,
+            select_y=y_val,
         )
         scorer = make_scorer(params, args.head, args.activation)
         train_accuracy, _ = accuracy(x_train_l, x_train_r, y_train, scorer)
@@ -888,23 +1023,26 @@ def main() -> None:
         x_test_l, x_test_r, y_test = build_pairs(by_split["test"], reduced)
         scorer = make_scorer(params, args.head, args.activation)
         test_accuracy, test_n = accuracy(x_test_l, x_test_r, y_test, scorer)
-        low, high = wilson_interval(test_accuracy, test_n)
-        print(f"\nTEST: {test_accuracy:.3f}  95% CI [{low:.3f}, {high:.3f}]  (n={test_n})")
+        print(f"\nHISTORICAL TEST (exploratory): {test_accuracy:.3f} (n={test_n})")
         test_report = {
             "accuracy": json_number(test_accuracy),
-            "ci": [json_number(low), json_number(high)],
+            "ci": None,
+            "status": "historical-reused-test; not confirmatory",
             "n": test_n,
         }
     else:
-        print("\nTest split untouched. Pass --report-test once the design is frozen.")
+        print(
+            "\nTest split not scored in this run; historical reuse remains. "
+            "Use fresh acceptance data."
+        )
 
     diagnostic = None
     if args.head == "mlp":
-        pool_z = np.stack(list(reduced.values()))
+        pool_z = np.stack([reduced[i] for i in reduced if splits[i] != "test"])
         compare_score = None
         if args.compare_linear_artifact:
             compare_scorer_by_id = load_scorer(args.compare_linear_artifact, embeddings)
-            pool_stems = list(reduced.keys())
+            pool_stems = [i for i in reduced if splits[i] != "test"]
 
             def compare_score(_z: np.ndarray, _stems: list[str] = pool_stems) -> np.ndarray:
                 # collapse_diagnostic scores by array position, but the linear
@@ -967,14 +1105,21 @@ def main() -> None:
     if args.head == "linear":
         np.savez(
             artifact,
-            centre=centre, basis=basis, weights=params["weights"],
+            centre=centre,
+            basis=basis,
+            weights=params["weights"],
+            normalize=np.array(args.normalize),
             calibration=calibration,
         )
     else:
         np.savez(
             artifact,
-            centre=centre, basis=basis,
-            w1=params["w1"], b1=params["b1"], w2=params["w2"],
+            centre=centre,
+            basis=basis,
+            normalize=np.array(args.normalize),
+            w1=params["w1"],
+            b1=params["b1"],
+            w2=params["w2"],
             activation=np.array(args.activation),
             calibration=calibration,
         )
@@ -987,7 +1132,21 @@ def main() -> None:
                 "hidden": args.hidden if args.head == "mlp" else None,
                 "activation": args.activation if args.head == "mlp" else None,
                 "collapseDiagnostic": diagnostic,
-                "dims": args.dims,
+                "dims": int(basis.shape[0]),
+                "requestedDims": args.dims,
+                "basisMode": args.basis,
+                "normalize": args.normalize,
+                "evaluationStatus": "exploratory",
+                "manifestFingerprint": manifest["fingerprint"] if manifest else None,
+                "legacyCacheAllowed": args.allow_legacy_cache,
+                "codeSha256": file_hash(Path(__file__)),
+                "decisionHashes": {
+                    p.name: file_hash(p)
+                    for p in sorted(args.decisions_dir.glob("decisions.*.jsonl"))
+                },
+                "teacherSha256": file_hash(args.teacher) if args.teacher else None,
+                "teacherSplit": "manifest" if manifest else args.teacher_split,
+                "teacherL2": args.teacher_l2 if args.teacher else None,
                 "l2": l2,
                 "trainPairs": counts["train"],
                 "valAccuracy": val_accuracy,

@@ -67,8 +67,17 @@ This checklist is the high-level source of truth for specification and implement
 - [x] A frozen visual-encoder baseline is implemented and evaluated.
 - [x] A pairwise scoring head is implemented and evaluated.
 - [x] The trained ranker is served on a live path: the artifact carries its own
-      display calibration, and `POST /v1/fit-score` returns a calibrated score
-      for one frame in approximately 95 ms warm on CPU.
+      display calibration, and `POST /v1/fit-score` returns a calibrated score.
+- [ ] Reproduce the historical approximately 95 ms warm CPU latency on the
+      intended hardware before promoting an experimental artifact.
+- [x] **Measured locally, not independently verified:** the frozen 2,000-label
+      candidate records 70.6 ms median / 111.8 ms p95 at the default eight Torch
+      threads. An exploratory six-thread run initially passed, but a larger
+      200-frame confirmation records 68.2 ms / 101.9 ms and fails the strict
+      95 ms p95 gate. The harness excludes HTTP, detection and concurrent load.
+- [ ] **Independently verify** latency on representative webcam crops under the
+      actual service workload; do not promote or change runtime thread settings
+      based on the exploratory local tuning runs.
 - [x] The preview harness can drive the real ranker from a real camera, with a
       readout of raw spread and latency.
 - [ ] The live ranker is verified on real webcam frames: stable across frames of
@@ -80,25 +89,38 @@ This checklist is the high-level source of truth for specification and implement
       With no model available the live bar is empty rather than invented.
 - [ ] Two connected players are observed running a real battle end to end on the
       live ranker.
-- [x] Scoring-head capacity and function class are evaluated and rejected as the
-      bottleneck. PCA dimensions are flat to 384 (no compression), and a ReLU MLP
-      head is *worse* than linear on held-out teacher fidelity (0.655-0.663 versus
-      0.676) while human validation regresses (0.677-0.684 versus 0.734). The
-      remaining candidates are upstream — the encoder, or the supervision.
-- [x] The pairwise ranker beats chance on its target cohort: 0.643, 95% CI
-      [0.561, 0.717], n=140, lower bound clear of 0.5. It does **not** beat
-      chance on pooled three-rater labels (0.553, CI [0.485, 0.619]), which is
-      why the cohort is defined rather than pooled.
+- [ ] Identify the limiting representation/head capacity with controlled,
+      independent evaluation. The historical "384-d" PCA actually returned
+      128 coordinates; the MLP comparison had inadequate regularisation.
+- [ ] Verify above-chance human agreement on a prospectively recruited cohort
+      and fresh subject/outfit groups. Historical 0.643 cohort and 0.553 pooled
+      estimates reuse test data and have invalid independent-vote intervals;
+      FW contributed no training rows. See [the audit](ranker-audit.md).
+- [x] Frozen manifests reject split/content conflicts and stale input hashes;
+      versioned collection rejects mixed teacher settings; regression tests pass.
+- [x] A 32-configuration linear sweep runs with true identity coordinates,
+      training-only projection, image-disjoint validation, retained candidates,
+      and separate teacher/human metrics. See [experiment status](ranker-experiments.md).
+- [x] **Implemented and measured:** 2,000 matched Gemini comparisons over the
+      existing 128 application training photographs are collected with verified
+      provenance, and immutable 500/1,000/2,000-label snapshots have each been
+      swept across all 32 linear configurations. This is reused development data,
+      not independent acceptance evidence.
+- [ ] Demonstrate improved live–Gemini agreement on fresh webcam battles within
+      the CPU budget; validation-selected photograph results are exploratory.
 - [x] A VLM-distillation teacher pipeline and a proximal fine-tuning path are
       implemented, replacing the descoped social weak supervision.
 - [x] Teacher preferences are collected over the Fashion144k image pool
       (1,972 usable pairs).
-- [x] Human inter-rater agreement is measured, establishing the model's ceiling
-      (0.686 pooled, 0.778 for the agreeing pair).
-- [ ] **Out of scope — measured and rejected as the goal.** Distillation does
-      not measurably improve held-out agreement: 0.643 versus 0.636 human-only
-      on the same 140 test pairs. Its demonstrated value is label independence
-      (zero-shot 0.709 against human-trained 0.715), not accuracy.
+- [x] Historical human inter-rater agreement is measured (0.686 pooled, 0.778
+      for AC/DP). These statistics do not establish a model accuracy ceiling.
+- [x] **Measured, not independently verified:** the frozen 2,000-label candidate
+      scores 57/63 = 90.5% decisive Gemini agreement on the reused validation set,
+      versus 47/63 = 74.6% for shipped; paired delta +15.9 points, exploratory
+      grouped CI [+1.3, +34.4]. Human agreement is reported separately: 97/130 =
+      74.6% versus 93/130 = 71.5%, delta +3.1 points, CI [−15.8, +20.0].
+- [ ] **Independently verify** the frozen candidate on prospectively collected,
+      subject/outfit-grouped webcam acceptance data. No such data has been supplied.
 - [ ] The live battle displays the distilled student's estimate instead of the
       seeded demo scores.
 - [x] During the countdown, both clients display the same bounded, seeded demo

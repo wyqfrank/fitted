@@ -7,6 +7,8 @@ room and shares its code. Once both players are connected and in frame, the app
 runs a five-second round, displays live scores, and returns a final comparison.
 
 The project was built for the UQCS Hackathon in August 2026.
+Since then, we have been invited to showcase FITTED at Integrate Expo in Sydney
+and to audiences of more than 300 people across Greater Brisbane.
 
 <p align="center">
   <img

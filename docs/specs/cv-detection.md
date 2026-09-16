@@ -1,18 +1,13 @@
 # CV Detection and Frame Preparation Specification
 
 **Product:** FITTED
-**Status:** Draft  
-**Implementation:** Initial browser pipeline and server-side garment-perception baseline implemented; representative fixture calibration and live-device validation pending
+**Status:** Browser pipeline and garment baseline implemented. Fixture calibration
+and device testing remain.
 **Scope:** Live person detection, pose tracking, frame-quality validation, and canonical outfit cropping  
 **Out of scope for this implementation:** Taste scoring, source-expert training, pairwise calibration, VLM serving, and production deployment. Their contracts with detection are documented below.
 
-This document expands the CV requirements in [`docs/PRD.md`](../PRD.md). The PRD remains the source of truth for product scope and high-level delivery status; this checklist tracks the detailed CV work.
-
-Task status uses Markdown checkboxes throughout this specification:
-
-- `[ ]` means incomplete, undecided, blocked, or not yet verified.
-- `[x]` means the exact stated outcome is implemented and verified.
-- Update the relevant checkbox when a change completes or invalidates a tracked outcome.
+This document expands the CV requirements in [`docs/PRD.md`](../PRD.md). See
+[`docs/next-steps.md`](../next-steps.md) for unfinished work.
 
 ## 1. Purpose
 
@@ -354,19 +349,19 @@ DeepFashion2 and Fashionpedia enter as evaluation and improvement data after thi
 
 Current experiment status:
 
-- [x] Define the reduced product garment taxonomy and typed service response.
-- [x] Implement a lazy, optional Grounding DINO Tiny adapter in the Python service.
-- [x] Add category mapping, box normalisation, duplicate suppression, and one-piece conflict handling tests.
-- [x] Smoke-test the configured model on a single-person full-body outfit image.
-- [x] Reject Grounding DINO Tiny as the live MVP runtime after measuring approximately 10.6 seconds for one CPU inference.
-- [x] Select the Fashionpedia-trained RF-DETR-Seg Small checkpoint as the only replacement candidate for the hackathon gate.
-- [x] Pin and record the candidate checkpoint revision, checksum, declared Apache 2.0 weight licence, and required attribution.
-- [x] Implement the RF-DETR-Seg adapter behind the existing garment-perception response.
-- [x] Carry canonical-crop geometry through room pairing and project reduced-category
+- Define the reduced product garment taxonomy and typed service response.
+- Implement a lazy, optional Grounding DINO Tiny adapter in the Python service.
+- Add category mapping, box normalisation, duplicate suppression, and one-piece conflict handling tests.
+- Smoke-test the configured model on a single-person full-body outfit image.
+- Reject Grounding DINO Tiny as the live MVP runtime after measuring approximately 10.6 seconds for one CPU inference.
+- Select the Fashionpedia-trained RF-DETR-Seg Small checkpoint as the only replacement candidate for the hackathon gate.
+- Pin and record the candidate checkpoint revision, checksum, declared Apache 2.0 weight licence, and required attribution.
+- Implement the RF-DETR-Seg adapter behind the existing garment-perception response.
+- Carry canonical-crop geometry through room pairing and project reduced-category
   detections back onto both mirrored video feeds as labelled bounding boxes.
-- [ ] Run the live acceptance gate on 15–20 representative webcam crops from the intended demo hardware.
-- [ ] Connect passing garment results to the live battle loop at approximately 1 FPS with one request in flight.
-- [ ] Post-hackathon: map DeepFashion2 and Fashionpedia evaluation labels into the reduced product taxonomy and run full per-category evaluation.
+- Run the live acceptance gate on 15–20 representative webcam crops from the intended demo hardware.
+- Connect passing garment results to the live battle loop at approximately 1 FPS with one request in flight.
+- Post-hackathon: map DeepFashion2 and Fashionpedia evaluation labels into the reduced product taxonomy and run full per-category evaluation.
 
 The single-image Grounding DINO CPU smoke test detected the expected top, bottoms, and two shoes after conservative category-consistency post-processing, but inference took approximately 10.6 seconds. That proves the adapter but fails the live-product requirement. Grounding DINO remains a diagnostic baseline and must not be integrated as a frozen-only garment result.
 
@@ -467,59 +462,59 @@ Measured performance must be recorded for both players' intended devices. If tar
 
 ### Unit tests
 
-- [x] Landmark-group visibility classification.
-- [x] Person-box and padded-crop calculations.
-- [x] Bounds clamping and safe pixel conversion.
-- [ ] Encoder aspect-ratio padding and resize-without-stretching.
-- [x] Temporal hysteresis state transitions.
-- [x] Motion calculation.
-- [x] Candidate expiry and deterministic selection.
-- [x] Expired and overflow candidate-resource cleanup.
-- [ ] Worker error and lifecycle cleanup where testable.
+- Landmark-group visibility classification.
+- Person-box and padded-crop calculations.
+- Bounds clamping and safe pixel conversion.
+- Encoder aspect-ratio padding and resize-without-stretching.
+- Temporal hysteresis state transitions.
+- Motion calculation.
+- Candidate expiry and deterministic selection.
+- Expired and overflow candidate-resource cleanup.
+- Worker error and lifecycle cleanup where testable.
 
 ### Fixture set
 
 Create and classify at least 50–100 representative stills or short sequences. Track fixture coverage explicitly:
 
-- [ ] Correctly framed outfits.
-- [ ] Person too near and too far.
-- [ ] Cropped head, torso, legs, and shoes.
-- [ ] Multiple people.
-- [ ] No person.
-- [ ] Low light and backlighting.
-- [ ] Motion blur.
-- [ ] Dark clothing.
-- [ ] Dresses, skirts, wide-leg trousers, and layered outerwear.
-- [ ] Bags, hats, and accessories extending beyond the body.
-- [ ] Front, side, back, and turning poses.
-- [ ] Varied body shapes, skin tones, mobility, and gender presentation.
+- Correctly framed outfits.
+- Person too near and too far.
+- Cropped head, torso, legs, and shoes.
+- Multiple people.
+- No person.
+- Low light and backlighting.
+- Motion blur.
+- Dark clothing.
+- Dresses, skirts, wide-leg trousers, and layered outerwear.
+- Bags, hats, and accessories extending beyond the body.
+- Front, side, back, and turning poses.
+- Varied body shapes, skin tones, mobility, and gender presentation.
 
 Training, tuning, and evaluation fixtures must be separated where thresholds are learned from the data.
 
 ### Integration tests
 
-- [ ] Video remains interactive while the worker runs on both intended laptops.
-- [ ] No frame queue develops during sustained motion.
-- [ ] Detection results retain correct timestamps.
-- [ ] A brief miss does not cause UI flicker.
-- [ ] A stale result is never sent as a new scoring frame.
-- [ ] Camera stop, restart, room leave, and component unmount release detection resources.
-- [ ] Each client submits only its latest stable local candidate with player,
+- Video remains interactive while the worker runs on both intended laptops.
+- No frame queue develops during sustained motion.
+- Detection results retain correct timestamps.
+- A brief miss does not cause UI flicker.
+- A stale result is never sent as a new scoring frame.
+- Camera stop, restart, room leave, and component unmount release detection resources.
+- Each client submits only its latest stable local candidate with player,
   sample, and capture-time identity.
-- [ ] The server pairs fresh submissions once per room and discards stale,
+- The server pairs fresh submissions once per room and discards stale,
   duplicate, and superseded work.
 
 ### Acceptance criteria before finalising this spec
 
-- [ ] Pose Lite and Pose Full are benchmarked on the intended laptops.
-- [ ] Initial thresholds are evaluated on the fixture set.
-- [ ] Valid crops retain the complete outfit and accessories at an agreed rate.
-- [ ] False acceptance of cropped or multi-person frames is measured.
-- [ ] Motion behaviour is tested with walking, turning, and a controlled spin.
-- [ ] The selected preprocessing variant is evaluated for score stability and person/background bias.
-- [ ] Per-client local-frame submission is validated for fresh, synchronised pair
+- Pose Lite and Pose Full are benchmarked on the intended laptops.
+- Initial thresholds are evaluated on the fixture set.
+- Valid crops retain the complete outfit and accessories at an agreed rate.
+- False acceptance of cropped or multi-person frames is measured.
+- Motion behaviour is tested with walking, turning, and a controlled spin.
+- The selected preprocessing variant is evaluated for score stability and person/background bias.
+- Per-client local-frame submission is validated for fresh, synchronised pair
   construction on the intended two-laptop setup.
-- [ ] Detection ownership, pairing, and frame transport are recorded as final decisions in the PRD.
+- Detection ownership, pairing, and frame transport are recorded as final decisions in the PRD.
 
 ## 17. Proposed file organisation
 
@@ -550,45 +545,45 @@ Keep pure crop, quality, motion, candidate-selection, and state-transition logic
 
 ## 18. Implementation sequence
 
-- [ ] Build a still-image MediaPipe spike and debug overlay.
-- [ ] Create and classify the initial fixture set.
-- [x] Implement landmark visibility and framing checks.
-- [x] Implement deterministic padded canonical cropping.
-- [ ] Compare Pose Lite and Pose Full on target hardware.
-- [x] Move video detection into a Web Worker.
-- [x] Implement latest-frame scheduling with zero queueing.
-- [x] Add temporal smoothing and hysteresis.
-- [x] Add brightness, blur, and motion metrics.
-- [x] Implement the recent candidate-frame buffer and selector.
-- [x] Integrate detection status into the battle UI.
-- [ ] Pad and resize selected crops to the encoder input shape without stretching.
-- [x] Connect per-client local-candidate submission and server-side pairing to the
+- Build a still-image MediaPipe spike and debug overlay.
+- Create and classify the initial fixture set.
+- Implement landmark visibility and framing checks.
+- Implement deterministic padded canonical cropping.
+- Compare Pose Lite and Pose Full on target hardware.
+- Move video detection into a Web Worker.
+- Implement latest-frame scheduling with zero queueing.
+- Add temporal smoothing and hysteresis.
+- Add brightness, blur, and motion metrics.
+- Implement the recent candidate-frame buffer and selector.
+- Integrate detection status into the battle UI.
+- Pad and resize selected crops to the encoder input shape without stretching.
+- Connect per-client local-candidate submission and server-side pairing to the
   `/v1/compare` service boundary.
-- [x] On finalisation, capture three timed stable slots, preserve any one-to-three
+- On finalisation, capture three timed stable slots, preserve any one-to-three
   complete synchronised pairs, and reject late live detection results.
-- [ ] Connect selected crops to the visual-encoder baseline.
-- [ ] Test camera restart, disconnect, and cleanup behaviour.
-- [ ] Run face-blur and background-neutralisation ablations.
-- [x] Implement and smoke-test the server-side garment-perception baseline.
-- [x] Decide that frozen-only garment perception does not satisfy the live product.
-- [x] Select RF-DETR-Seg Small as the only time-boxed live replacement candidate.
-- [x] Implement and unit-test the RF-DETR-Seg adapter and paired inference boundary.
-- [x] Add an idempotent checkpoint bootstrap that verifies the pinned byte size and
+- Connect selected crops to the visual-encoder baseline.
+- Test camera restart, disconnect, and cleanup behaviour.
+- Run face-blur and background-neutralisation ablations.
+- Implement and smoke-test the server-side garment-perception baseline.
+- Decide that frozen-only garment perception does not satisfy the live product.
+- Select RF-DETR-Seg Small as the only time-boxed live replacement candidate.
+- Implement and unit-test the RF-DETR-Seg adapter and paired inference boundary.
+- Add an idempotent checkpoint bootstrap that verifies the pinned byte size and
   SHA-256 before enabling the local RF-DETR runtime.
-- [x] Render reduced-category RF-DETR boxes on both mirrored player feeds using the
+- Render reduced-category RF-DETR boxes on both mirrored player feeds using the
   exact crop geometry associated with each paired inference sample.
-- [ ] Run the representative-crop portion of the 90-minute acceptance gate.
-- [ ] Integrate garment perception at approximately 1 FPS only if the acceptance gate passes.
-- [ ] Post-hackathon: evaluate garment perception on mapped DeepFashion2, Fashionpedia, and larger webcam fixtures.
+- Run the representative-crop portion of the 90-minute acceptance gate.
+- Integrate garment perception at approximately 1 FPS only if the acceptance gate passes.
+- Post-hackathon: evaluate garment perception on mapped DeepFashion2, Fashionpedia, and larger webcam fixtures.
 
 ## 19. Open decisions
 
-- [ ] Pose Lite versus Pose Full after benchmarking.
-- [ ] Final landmark visibility and framing thresholds.
-- [ ] Exact brightness, blur, and motion thresholds.
-- [ ] Whether face blurring becomes the default preprocessing path.
-- [ ] Whether background segmentation improves fairness without removing useful accessories or silhouette.
-- [ ] Whether garment boxes or masks materially improve target-audience preference accuracy.
+- Pose Lite versus Pose Full after benchmarking.
+- Final landmark visibility and framing thresholds.
+- Exact brightness, blur, and motion thresholds.
+- Whether face blurring becomes the default preprocessing path.
+- Whether background segmentation improves fairness without removing useful accessories or silhouette.
+- Whether garment boxes or masks materially improve target-audience preference accuracy.
 
 Decisions locked for the initial implementation:
 
@@ -692,9 +687,9 @@ The hackathon should load existing checkpoints or train small heads over cached 
 
 Detection locates evidence and establishes judgeability; it never directly determines fashion quality.
 
-- [x] The detection boundary between provisional live estimates and
+- The detection boundary between provisional live estimates and
   authoritative final scoring is documented.
-- [ ] Final-frame capture, identity, freshness, and late-result rejection are
+- Final-frame capture, identity, freshness, and late-result rejection are
   implemented and verified on both clients.
 
 During the current hackathon round, detection gates readiness but does not
@@ -793,14 +788,14 @@ StreamingVLM is deferred. The published [StreamingVLM](https://proceedings.iclr.
 
 ## 24. Thirty-hour decision gates
 
-- [ ] Establish a working paired-image VLM response and fallback first.
-- [ ] Prepare webcam-like calibration images and safe person/outfit/session splits.
-- [ ] Cache DINOv2 Small and/or SigLIP 2 Base embeddings rather than fine-tuning an encoder.
-- [ ] **Out of scope (hackathon):** Train the Instagram residual head if its cleaned metadata is ready.
-- [ ] **Out of scope (hackathon):** Add Depop only if its data is ready and it improves held-out FITTED agreement.
-- [ ] Train the small human-calibrated combiner.
-- [ ] Integrate frame-quality states, explanation, and result synchronisation.
-- [ ] Rehearse the complete two-laptop flow and failure recovery.
+- Establish a working paired-image VLM response and fallback first.
+- Prepare webcam-like calibration images and safe person/outfit/session splits.
+- Cache DINOv2 Small and/or SigLIP 2 Base embeddings rather than fine-tuning an encoder.
+- **Out of scope (hackathon):** Train the Instagram residual head if its cleaned metadata is ready.
+- **Out of scope (hackathon):** Add Depop only if its data is ready and it improves held-out FITTED agreement.
+- Train the small human-calibrated combiner.
+- Integrate frame-quality states, explanation, and result synchronisation.
+- Rehearse the complete two-laptop flow and failure recovery.
 
 Stop source-expert work if the data cannot be cleaned and split safely. Do not integrate a learned ranker that fails person/creator-disjoint validation. Preserve a paired VLM-only path as the reliable demo fallback.
 
@@ -817,15 +812,15 @@ After the model is validated, production may export stable models to ONNX and be
 
 Evaluation tasks:
 
-- [ ] Measure pairwise agreement with held-out human labels.
-- [ ] Measure inter-rater agreement.
-- [ ] Measure person-, creator-, outfit-, and session-disjoint performance.
-- [ ] Verify A/B swap invariance.
-- [ ] Evaluate draw and `cannot_judge` behaviour.
-- [ ] Measure stability across representative frames of one outfit.
-- [ ] Measure sensitivity to background, lighting, pose, and camera quality.
-- [ ] Measure the incremental value of every expert.
-- [ ] Record median and 95th-percentile live latency.
+- Measure pairwise agreement with held-out human labels.
+- Measure inter-rater agreement.
+- Measure person-, creator-, outfit-, and session-disjoint performance.
+- Verify A/B swap invariance.
+- Evaluate draw and `cannot_judge` behaviour.
+- Measure stability across representative frames of one outfit.
+- Measure sensitivity to background, lighting, pose, and camera quality.
+- Measure the incremental value of every expert.
+- Record median and 95th-percentile live latency.
 
 Compare at least a VLM-only baseline and the human-calibrated visual ensemble. Remove an expert if it does not add held-out signal, regardless of its training-set performance. The Instagram-only baseline is out of scope for the hackathon along with its expert.
 

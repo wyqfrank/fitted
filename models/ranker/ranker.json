@@ -1,54 +1,41 @@
 {
-  "version": "dinov2s-pca-linear-v1",
-  "encoder": "facebook/dinov2-small",
-  "head": "linear",
-  "hidden": null,
-  "activation": null,
-  "collapseDiagnostic": null,
-  "dims": 16,
-  "l2": 0.03,
-  "trainPairs": 761,
-  "valAccuracy": 0.7341772151898734,
-  "test": {
-    "accuracy": 0.6428571428571429,
-    "ci": [
-      0.5606434835587822,
-      0.7174401862557916
-    ],
-    "n": 140
-  },
-  "raters": [
-    "AC",
-    "DP"
-  ],
-  "ratersRequested": [
-    "AC",
-    "DP"
-  ],
-  "teacherPairs": 1972,
-  "teacher": {
-    "holdout": 0.0,
-    "inSample": {
-      "accuracy": 0.6739356178608515,
-      "n": 1926
-    },
-    "heldOut": {
-      "accuracy": null,
-      "ci": [
-        null,
-        null
-      ],
-      "n": 0
-    },
-    "zeroShotValAccuracy": 0.7088607594936709
-  },
+  "basisMode": "identity",
   "calibration": {
-    "quantiles": 256,
-    "fittedOnImages": 128,
-    "rawRange": [
-      -1.1804637908935547,
-      1.5059998035430908
-    ]
+    "fittedOn": "teacher-training-images",
+    "images": 128
   },
-  "projectionFittedOn": "train-pool"
+  "dims": 384,
+  "effectiveDims": 384,
+  "encoder": "facebook/dinov2-small",
+  "evaluationStatus": "exploratory-validation-selection; no test scored",
+  "head": "linear",
+  "id": "identity-384-l2norm-reg-0.0001",
+  "l2": 0.0001,
+  "manifestFingerprint": "0a18d5242fbe905c1509f6d7126404b9bf2a29a42ff544fe23e1c2e0eb888a1b",
+  "normalize": true,
+  "requestedDims": 384,
+  "stage": "teacher-only",
+  "train": {
+    "accuracy": 0.9422680412371134,
+    "bce": 0.20466108620166779,
+    "decisiveDecisions": 1940,
+    "pairs": 2000
+  },
+  "val": {
+    "accuracy": 0.9047619047619048,
+    "bce": 0.3397477865219116,
+    "decisiveDecisions": 63,
+    "pairs": 65
+  },
+  "version": "dinov2s-linear-v2",
+  "experimentVersion": "dinov2s-linear-experiment-v2",
+  "promotion": {
+    "date": "2026-09-16",
+    "from": "artifacts/ranker-audit-20260906/fit-2000/identity-384-l2norm-reg-0.0001",
+    "replaces": {
+      "version": "dinov2s-pca-linear-v1",
+      "rankerNpzSha256": "309f67a0152de6399f1fe8a10e72f82abf54ee93d90f3e2b64658df3c0e4707d"
+    },
+    "basis": "team decision on reused development evidence; fresh webcam acceptance data declared out of scope; strict 95 ms p95 CPU gate not met by either artifact"
+  }
 }

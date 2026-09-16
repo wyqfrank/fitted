@@ -1,43 +1,11 @@
 # Scoring model specification
 
-**Status:** The server-authoritative 5-second round and one-to-five-pair final
-VLM burst are implemented and covered by automated tests. Real-provider,
-browser-visual, two-device, learned live scoring, training, and representative
-evaluation work remains pending. A labelled bounded demo estimate is implemented
-for the countdown and is never used by final scoring.
+The server-controlled five-second round, final VLM request, and learned live
+score are implemented and tested. The live score is still a single number, not
+a calibrated range. See [next-steps.md](../next-steps.md) for unfinished work.
 
-This specification narrows the PRD's scoring direction into the first executable
-boundary. The hackathon currently uses labelled seeded demo estimates during a
-battle and exact server-authoritative scores at finalisation. Calibrated learned
-live ranges remain the target. The target audience, measured draw
-threshold, final displayed-score calibration, and choice of frozen visual encoder
-remain unsettled.
-
-## Delivery status
-
-- [x] The provisional-live versus authoritative-final product decision is
-  documented with initial display defaults and continuity targets.
-- [x] The phase-aware final/not-scoreable response contract is implemented and
-  tested.
-- [x] A shared `55..85` demo estimate is displayed and explicitly labelled
-  `LIVE ESTIMATE`; it is deterministic per round/500 ms slice and final scoring
-  never consumes it.
-- [ ] The learned provisional live-range UI is implemented and tested.
-- [x] Finalisation locks an exact server-authoritative result in the coordinator
-  and both client roles map that result consistently.
-- [x] Both locally score-ready roles start one server-owned 5-second round, with
-  early finalisation and disconnect cancellation handled by the coordinator.
-- [x] Finalisation captures five time-spaced slots and sends all available
-  complete pairs to Gemini in one request.
-- [ ] Live-to-final continuity targets are measured on representative webcam
-  battles and the live display is tuned or reduced to the qualitative fallback.
-
-Automated verification on 2026-08-22 passes TypeScript typecheck, 75 web unit
-tests, 29 Node coordinator tests, 63 Python/API tests, Ruff, and the production
-build. The signalling smoke test could not be rerun while the user's existing
-Next dev server held the development lock; its prior passing status is unchanged.
-The credentialed Gemini smoke test is present but skipped by default; visual
-browser QA and two-laptop acceptance have not yet run.
+This document defines the scoring API and runtime behaviour. The draw threshold,
+display-score calibration, and choice of frozen visual encoder are still open.
 
 ## Runtime contract
 
@@ -372,86 +340,86 @@ service remains stateless.
 
 #### Phase 1 — Freeze contracts and fixtures
 
-- [x] Define strict internal VLM assessment models, including a not-scoreable path.
-- [x] Extend the public response with pair/sample identity and scored/not-scoreable
+- Define strict internal VLM assessment models, including a not-scoreable path.
+- Extend the public response with pair/sample identity and scored/not-scoreable
   states without representing failure as a numeric score.
-- [ ] Add explicit `live_provisional`, `final`, and `not_scoreable` response states,
+- Add explicit `live_provisional`, `final`, and `not_scoreable` response states,
   including live ranges and finalisation identity.
-- [x] Write the versioned rubric and safety prompt as a separately testable asset.
-- [ ] Create consented local A/B image fixtures covering valid, poor, unusable,
+- Write the versioned rubric and safety prompt as a separately testable asset.
+- Create consented local A/B image fixtures covering valid, poor, unusable,
   close, and clearly different pairs.
 
 #### Phase 2 — Provider adapter
 
-- [x] Add the inference-service-only Google Gen AI dependency and server
+- Add the inference-service-only Google Gen AI dependency and server
   configuration.
-- [x] Define a small provider-neutral VLM protocol so tests and future providers
+- Define a small provider-neutral VLM protocol so tests and future providers
   do not depend directly on the Google SDK.
-- [x] Implement the Gemini adapter with labelled chronological image sequences,
+- Implement the Gemini adapter with labelled chronological image sequences,
   explicit media resolution, strict structured output, and bounded timeout.
-- [x] Validate response values after schema parsing and map provider errors into
+- Validate response values after schema parsing and map provider errors into
   explicit domain errors.
-- [x] Report configured readiness and provider model in health, with
+- Report configured readiness and provider model in health, with
   provider/prompt/scoring versions in comparison responses.
 
 #### Phase 3 — Fallback scoring engine
 
-- [x] Add a VLM fallback engine behind the existing `InferenceEngine` boundary.
-- [x] Calculate player scores with the existing deterministic 45/30/25 function.
-- [x] Apply the provisional draw threshold and keep `winProbability` null.
-- [x] Return observations and explanation without exposing hidden reasoning.
-- [x] Select the backend through configuration; retain explicit `503` behaviour
+- Add a VLM fallback engine behind the existing `InferenceEngine` boundary.
+- Calculate player scores with the existing deterministic 45/30/25 function.
+- Apply the provisional draw threshold and keep `winProbability` null.
+- Return observations and explanation without exposing hidden reasoning.
+- Select the backend through configuration; retain explicit `503` behaviour
   when no backend is configured.
 
 #### Phase 4 — Paired browser integration
 
-- [x] Capture each current local video frame with the latest valid outfit crop
+- Capture each current local video frame with the latest valid outfit crop
   geometry, with newest-stable-candidate fallback and no remote-video capture.
-- [x] Pair fresh A/B submissions in a server-side coordinator rather than
+- Pair fresh A/B submissions in a server-side coordinator rather than
   capturing a remote WebRTC element in either browser.
-- [x] Add room/player identity, pair/sample IDs, timestamps, collection deadline,
+- Add room/player identity, pair/sample IDs, timestamps, collection deadline,
   one-request-per-room backpressure, deduplication, and stale-response rejection.
-- [x] Broadcast one authoritative result from the coordinator to both players.
-- [ ] Preserve the last valid score and show actionable analysing, not-scoreable,
+- Broadcast one authoritative result from the coordinator to both players.
+- Preserve the last valid score and show actionable analysing, not-scoreable,
   timeout, and unavailable states.
-- [x] Display shared bounded demo scores with a persistent `LIVE ESTIMATE` label,
+- Display shared bounded demo scores with a persistent `LIVE ESTIMATE` label,
   no premature winner declaration, and authoritative-final replacement.
-- [ ] Replace the demo score with smoothed learned live ranges.
-- [x] On finalisation, stop live updates, show final analysis in progress, then
+- Replace the demo score with smoothed learned live ranges.
+- On finalisation, stop live updates, show final analysis in progress, then
   atomically lock the exact server-authoritative scores and winner or draw on
   both clients.
-- [ ] Record out-of-range final reveals and show an explicit adjusted-estimate
+- Record out-of-range final reveals and show an explicit adjusted-estimate
   transition instead of clamping the final score.
-- [x] Start one server-authoritative 5-second round when both roles are ready,
+- Start one server-authoritative 5-second round when both roles are ready,
   allow either player to finalise early, and cancel on disconnect.
-- [x] On finalisation, request five paired slots approximately 750 ms apart and
+- On finalisation, request five paired slots approximately 750 ms apart and
   score any one-to-five complete pairs in one Gemini request.
-- [ ] Consider configurable `2–3 second` VLM polling only as an optional
+- Consider configurable `2–3 second` VLM polling only as an optional
   fallback experiment after the freeze/final path is reliable.
 
 #### Phase 5 — Verification and evaluation
 
-- [x] Unit-test prompt construction, image labelling, schema validation,
+- Unit-test prompt construction, image labelling, schema validation,
   deterministic scoring, error mapping, and refusal/incomplete handling with a
   fake provider.
-- [x] API-test configured success, missing configuration, invalid images,
+- API-test configured success, missing configuration, invalid images,
   not-scoreable results, timeouts, and provider failures without network access.
-- [x] Coordinator-test one request per room in flight, countdown expiry, early
+- Coordinator-test one request per room in flight, countdown expiry, early
   finalisation, disconnect cleanup, burst fallback, stale/duplicate rejection,
   and locked-result replay.
-- [ ] Browser-test the complete countdown, capture, and consistent authoritative
+- Browser-test the complete countdown, capture, and consistent authoritative
   result flow on both clients.
-- [x] Add an opt-in real-provider smoke test that never runs in the default suite.
-- [ ] Evaluate at least 30–50 consented representative pairs, including swapped
+- Add an opt-in real-provider smoke test that never runs in the default suite.
+- Evaluate at least 30–50 consented representative pairs, including swapped
   A/B duplicates and multiple frames of the same outfit.
-- [ ] Record agreement, swap consistency, score stability, median/P95 latency,
+- Record agreement, swap consistency, score stability, median/P95 latency,
   not-scoreable rate, token use, and approximate request cost.
-- [ ] Measure live-range coverage, absolute live-to-final error, provisional
+- Measure live-range coverage, absolute live-to-final error, provisional
   leader agreement, reversals, and visible score jumps on representative battles.
-- [ ] Tune the live band to the stated coverage target, or replace live numbers
+- Tune the live band to the stated coverage target, or replace live numbers
   with the qualitative fallback if the target requires a band wider than sixteen
   points.
-- [ ] Record Gemini 3.6 Flash results on the frozen evaluation set; defer a
+- Record Gemini 3.6 Flash results on the frozen evaluation set; defer a
   cross-provider bake-off until after the hackathon unless Gemini blocks delivery.
 
 ### Definition of done
@@ -480,21 +448,21 @@ ML inference or pairwise-head items complete solely because the fallback works.
 
 ## Required evaluation
 
-- [x] Validate score ranges and reject malformed scoring artifacts.
-- [x] Verify that swapping A and B swaps scores and complements win probability.
-- [x] Verify identical vectors produce a 50/50 prediction.
-- [ ] Define a versioned pair-label and expert-feature dataset schema.
-- [ ] Define and version the per-expert input transformations required before
+- Validate score ranges and reject malformed scoring artifacts.
+- Verify that swapping A and B swaps scores and complements win probability.
+- Verify identical vectors produce a 50/50 prediction.
+- Define a versioned pair-label and expert-feature dataset schema.
+- Define and version the per-expert input transformations required before
   source experts are connected.
-- [ ] Implement non-negative, regularised pairwise logistic training.
-- [ ] Fit and evaluate the head on person/outfit/session-disjoint data.
-- [ ] Measure calibration and select the temperature on validation data.
-- [ ] Compare the visual-only, VLM-only, and available source-expert variants.
-- [ ] Verify the live-to-final coverage and provisional-leader targets on a
+- Implement non-negative, regularised pairwise logistic training.
+- Fit and evaluate the head on person/outfit/session-disjoint data.
+- Measure calibration and select the temperature on validation data.
+- Compare the visual-only, VLM-only, and available source-expert variants.
+- Verify the live-to-final coverage and provisional-leader targets on a
   representative webcam fixture set.
-- [ ] Decide draw behaviour and a separate displayed-score `0..100` calibration
+- Decide draw behaviour and a separate displayed-score `0..100` calibration
   from measured results.
-- [ ] Connect validated expert outputs and the artifact to the inference engine.
+- Connect validated expert outputs and the artifact to the inference engine.
 
 The PRD's pairwise-head implementation item remains incomplete until training and
 held-out evaluation have both run on representative human labels.

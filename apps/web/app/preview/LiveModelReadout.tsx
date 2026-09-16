@@ -41,11 +41,10 @@ function median(values: number[]) {
  * The instrument for the one question offline evaluation cannot answer: does
  * this model behave sanely on webcam frames?
  *
- * It was trained on curated full-body photos and the PCA basis was fitted on
- * 128 of them. Live input is a 640px webcam crop under whatever lighting the
- * venue has. If those embeddings land off that manifold the pipeline still
- * returns a confident number, so the failure is silent unless something is
- * watching for it.
+ * It was trained and calibrated on 128 curated full-body photos. Live input is
+ * a 640px webcam crop taken under the venue's lighting. The model can still
+ * return a confident score for unfamiliar input, so this readout makes that
+ * failure visible.
  *
  * Two readings matter, and both are on raw scores rather than the smoothed
  * display value, because smoothing would hide exactly what is being tested:

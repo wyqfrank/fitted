@@ -133,6 +133,8 @@ production build.
 ## Documentation
 
 - [Product requirements](docs/PRD.md)
+- [Architecture and decisions](docs/architecture.md)
+- [Next steps](docs/next-steps.md)
 - [Inference service](services/inference/README.md)
 - [Ranker evaluation](docs/ranker-audit.md)
 - [Labelling workflow](docs/labelling-station.md)
@@ -141,6 +143,7 @@ production build.
 
 The source code is available under the [MIT License](LICENSE).
 
-The shipped ranker was trained partly on Fashion144k images, which are restricted
-to non-commercial research and education. Third-party models retain their own
-licenses.
+The current ranker was trained from Gemini comparisons of the project's own
+labelled photos. The previous ranker also used Fashion144k images, which are
+limited to non-commercial research and education. Third-party models keep their
+original licences.

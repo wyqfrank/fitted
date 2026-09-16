@@ -1,5 +1,10 @@
 # FITTED scoring — handoff
 
+> This handoff is kept for historical context. See
+> [architecture.md](architecture.md) for the current system and
+> [next-steps.md](next-steps.md) for unfinished work. Unless noted, the content
+> below predates the ranker change on 2026-09-16.
+
 Working notes for continuing the ML scoring work in a fresh session.
 **2026-09-06 correction:** The historical results and recommendations below are
 superseded where contradicted by [ranker-audit.md](ranker-audit.md). In particular,
@@ -136,11 +141,16 @@ Artifact: `models/ranker/ranker.npz` + `ranker.json` — committed, by deliberat
 exception to the `models/` ignore rule. It cannot be rebuilt from a clone: the
 training inputs are the label pool (photographs of real people, never
 committed) and the 7.8 GB Fashion144k teacher pool, so only a machine holding
-both can run the command above. At 29 KB it ships with the source instead, and
-a fresh clone scores live without a training run.
+both can run the command above. The 600 KB artifact ships with the source so a
+fresh clone can score live without retraining.
 
-Architecture: frozen DINOv2-S → PCA to 16 dims (basis fitted on training images
-only) → linear scorer, **no intercept**, so swap consistency holds by
+**Current model:** On 2026-09-16, `dinov2s-linear-v2` replaced
+`dinov2s-pca-linear-v1`. It uses 384 identity coordinates, L2 normalisation, and
+L2 regularisation of 0.0001. The file is about 600 KB. See
+[ranker-experiments.md](ranker-experiments.md).
+
+Original architecture: frozen DINOv2-S → PCA to 16 dimensions, fitted on
+training images only → linear scorer with **no intercept**, so swap consistency holds by
 construction rather than by measurement. Now expressed as a per-image scorer
 `f(z) = w·z` with the margin as `f(a) - f(b)`; mathematically identical to the
 old difference-vector form, and verified bit-identical against it.
@@ -254,7 +264,9 @@ number is needed later, collect fresh labels or hold out new images.
 
 ## Open options, ranked
 
-**1. In-domain teacher labels — ~$5, ~1 hour.** Have Gemini judge pairs built
+**1. In-domain teacher labels — done.** The current head was trained from 2,000
+Gemini comparisons of the project's training photos. See
+[ranker-experiments.md](ranker-experiments.md). The original plan was to build pairs
 from the project's own 128 **training-split** images instead of Fashion144k.
 Removes the domain gap and removes the non-commercial licence constraint.
 **Critical: pair only train-split images.** The 62 benchmark pairs are test pairs
@@ -267,8 +279,9 @@ encode what Gemini reacts to, no head shape or training data fixes it.
 
 **3. Wire to the app — done for the preview harness, not yet for a battle.**
 `src/fitted_inference/ranker.py` loads the artifact and serves
-`POST /v1/fit-score` (~95 ms/frame warm on this CPU, measured end to end
-including decode). The artifact now carries its own calibration — 256 quantiles
+`POST /v1/fit-score`. On webcam-sized input it takes 89 ms at the median and
+117 ms at p95, which misses the target. See [next-steps.md](next-steps.md). The
+artifact carries its own calibration: 256 quantiles
 of the training-image score distribution — so a raw margin becomes a percentile
 and then a display score without the app knowing anything about the head. Swap
 the artifact and the mapping swaps with it.

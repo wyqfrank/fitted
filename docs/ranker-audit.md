@@ -1,8 +1,12 @@
 # Ranker audit and ranked experiment plan
 
-Audit date: 2026-09-06. The audit is complete. Implementation and executed results
-are tracked separately in [ranker-experiments.md](ranker-experiments.md); unchecked
-experiments below have not met their full acceptance criteria.
+> This document describes the experiments. See
+> [next-steps.md](next-steps.md) for unfinished work.
+
+
+Audit date: 2026-09-06. The audit is complete. See
+[ranker-experiments.md](ranker-experiments.md) for code and results. The proposed
+experiments remain here for reference.
 
 Source line citations below describe the pre-implementation files at repository
 revision `6956830b84866806f76dd5fdce67ac89c44de873`. Working-tree line numbers move
@@ -178,7 +182,7 @@ All changes remain offline until validated. Photos and captures stay in local, g
 
 ### 0. Repair evaluation and establish a fresh benchmark — Makes the metric trustworthy
 
-- [ ] Implement and validate experiment 0 against the criteria below.
+- Implement and validate experiment 0 against the criteria below.
 
 - **Hypothesis / ceiling:** Current measurement cannot distinguish label inconsistency, teacher inconsistency, and student generalisation.
 - **Concrete change:** Add an evaluation-manifest module shared by `train_ranker.py`, `distil_teacher.py`, and `benchmark_judges.py`. Record content/group/split IDs, code/config hashes, actual basis dimensions, model stage, and teacher prompt/media provenance. Split images/groups before constructing teacher pairs. Load environment settings before argument defaults. Add cached-only evaluation and production draw handling.
@@ -189,7 +193,7 @@ All changes remain offline until validated. Photos and captures stay in local, g
 
 ### 1. Test genuine full-coordinate capacity with appropriate regularisation — Raises the metric
 
-- [ ] Implement and validate experiment 1 against the criteria below.
+- Implement and validate experiment 1 against the criteria below.
 
 - **Hypothesis / ceiling:** Compression and the fixed teacher penalty account for recoverable student–teacher disagreement.
 - **Concrete change:** In `fit_projection()`, add an explicit identity-basis mode and report effective dimensions. In `project()`, expose normalization as a recorded option. Sweep 16/64/128/identity-384 with L2 **0, 0.0001, 0.001, 0.01**, selecting on image-disjoint **teacher validation**, not human validation.
@@ -200,7 +204,7 @@ All changes remain offline until validated. Photos and captures stay in local, g
 
 ### 2. Measure teacher repeatability, order sensitivity, and pointwise compatibility — Makes the metric trustworthy
 
-- [ ] Implement and validate experiment 2 against the criteria below.
+- Implement and validate experiment 2 against the criteria below.
 
 - **Hypothesis / ceiling:** Some apparent representation loss is an inconsistent or context-dependent target.
 - **Concrete change:** Extend `distil_teacher.py::judge()` and `benchmark_judges.py::run_gemini()` to preserve individual repetitions, orientation, complete scores, and exact configuration. Judge **100 development pairs three times in each orientation**, plus **30 disjoint image triples** with all three edges.
@@ -211,7 +215,7 @@ All changes remain offline until validated. Photos and captures stay in local, g
 
 ### 3. Compare matched in-domain and Fashion144k distillation — Raises the metric
 
-- [ ] Implement and validate experiment 3 against the criteria below.
+- Implement and validate experiment 3 against the criteria below.
 
 - **Hypothesis / ceiling:** Training-image distribution, rather than head capacity alone, limits fidelity.
 - **Concrete change:** Make `distil_teacher.py::sample_pairs()` accept an explicit training-image manifest. Generate **2,000 unique pairs** only from the existing **128 training images**, using the verified production configuration. Train human-only, teacher-only, and teacher-plus-human stages under identical projection and selection rules.
@@ -222,7 +226,7 @@ All changes remain offline until validated. Photos and captures stay in local, g
 
 ### 4. Test information discarded by CLS-only extraction — Raises the metric
 
-- [ ] Implement and validate experiment 4 against the criteria below.
+- Implement and validate experiment 4 against the criteria below.
 
 - **Hypothesis / ceiling:** The frozen encoder contains useful information that its current single CLS descriptor does not expose.
 - **Concrete change:** In `embed_pool()` and `Dinov2FitRanker.score()`, compare CLS, mean patch tokens, and their concatenation from the **same forward pass**. Version the descriptor and cache; apply the validated projection/regularisation procedure.
@@ -235,7 +239,7 @@ All changes remain offline until validated. Photos and captures stay in local, g
 
 ### 5. Re-test nonlinear learning with controlled regularisation and a data curve — Raises the metric
 
-- [ ] Implement and validate experiment 5 against the criteria below.
+- Implement and validate experiment 5 against the criteria below.
 
 - **Hypothesis / ceiling:** The rejected MLP recipe overfit because its function was poorly constrained and its teacher dataset was small.
 - **Concrete change:** In `fit_head()`, regularise both ReLU layers during teacher training; during human fine-tuning, constrain function drift using teacher-training examples instead of anchoring only `w2`. Add validation-selected early stopping and report every seed. Compare linear and width-16 ReLU on nested **500/1,000/2,000/4,000** teacher-pair sets.
@@ -246,7 +250,7 @@ All changes remain offline until validated. Photos and captures stay in local, g
 
 ### 6. Conditional last-block encoder adaptation — Raises the metric
 
-- [ ] Implement and validate experiment 6 only after its prerequisite controls justify it.
+- Implement and validate experiment 6 only after its prerequisite controls justify it.
 
 - **Hypothesis / ceiling:** After valid descriptor/head controls, frozen features remain the limiting factor.
 - **Concrete change:** Add an offline training path that unfreezes only DINOv2’s last transformer block and the head. Export the adapted encoder checkpoint with preprocessing/version metadata; load it explicitly in `Dinov2FitRanker.__init__()`.

@@ -1,6 +1,6 @@
 # Ranker implementation and experiment log
 
-Updated 2026-09-07. Implements the priorities in [ranker-audit.md](ranker-audit.md).
+Updated 2026-09-16. Implements the priorities in [ranker-audit.md](ranker-audit.md).
 Primary objective: **live–Gemini agreement**. Human agreement is a separate quality
 measure; copying Gemini does not establish human-level quality.
 
@@ -31,17 +31,15 @@ measure; copying Gemini does not establish human-level quality.
   the identical 65 validation pairs. Independent gain remains unverified.
 - [x] **Makes the metric trustworthy:** execute the real CPU `score(bytes)`
   latency harness on both artifacts. The strict 95 ms p95 gate did not pass.
+- [x] The frozen 2,000-label candidate now ships as `dinov2s-linear-v2`. The live
+  loader reproduces its validation margins.
 - [x] **Implemented and measured, not independently verified:** all 2,000 teacher
   comparisons over the existing application training photographs are complete;
   immutable 500/1,000/2,000-label snapshots and all 96 candidate fits are retained.
   The reused validation set shows an exploratory gain, described below.
-- [ ] **Makes the metric trustworthy:** fresh webcam benchmark with independently
-  supplied subject/outfit groups, collected before opening acceptance results.
-- [ ] **Raises the metric:** demonstrate an improvement on that benchmark and
-  verify the selected model within the 95 ms/frame CPU budget before promotion.
-- [ ] Implement teacher repeat/swap/cycle diagnostics, descriptor comparisons,
-  controlled MLP learning curves, and conditional encoder adaptation as justified
-  by the earlier experiments. None is claimed complete by the linear sweep.
+
+See [next-steps.md](next-steps.md) for the remaining latency, benchmarking, and
+model-diagnostic work.
 
 Current photographs contain 128 training, 29 validation and 25 test images.
 Grouping is **image-ID-only**: exact content overlap is checked, but different
@@ -55,9 +53,9 @@ or justify encoder unfreezing. The original Fashion144k teacher lacks historical
 prompt provenance, so comparing it with the new application teacher also changes
 teacher settings. A difference cannot be attributed exclusively to source domain.
 
-Photos, judgments, embeddings, manifests containing local paths, and experimental
-artifacts stay under gitignored local directories. The shipped `models/ranker`
-artifact is not overwritten. No redistribution of the photo pool is required.
+Photos, judgements, embeddings, local-path manifests, and experimental artifacts
+stay in ignored local directories. The shipped artifact was updated only when the
+new model was selected on 2026-09-16. The photo set does not need to be shared.
 
 ## Executed linear control
 
@@ -239,15 +237,59 @@ still fails the strict p95 gate. No runtime thread setting was changed.
 Median latency is within 95 ms, but the required p95 is not. This harness still
 excludes HTTP, garment detection and concurrent service load, so realistic latency
 is not independently verified. Fresh subject/outfit-grouped webcam acceptance data
-has not been supplied. These two unmet gates block promotion; `models/ranker`
-remains unchanged.
+has not been supplied. The model was still selected despite both missing checks.
 
 Final verification: **108 inference tests passed, one opt-in Gemini smoke test
 skipped**; Ruff passes for every changed Python file; `git diff --check` passes.
 The existing Starlette/httpx deprecation warning remains. The completed 65-pair
 validation collection separately exercises the external provider with consent.
-The shipped artifact has no Git diff and its SHA-256 remains
+Before that change, the shipped artifact had SHA-256
 `309f67a0152de6399f1fe8a10e72f82abf54ee93d90f3e2b64658df3c0e4707d`.
+
+## Model change on 2026-09-16
+
+The team chose the frozen 2,000-label model without completing the two checks
+above. A new subject- and outfit-grouped webcam set was out of scope, and the team
+also skipped the webcam sanity check. Its 90.5% result is agreement with Gemini on
+a reused validation set, not accuracy on new data.
+
+- `models/ranker/ranker.npz` is the candidate unchanged, SHA-256
+  `378241c75bb0c790b94dea49be45b5a80ed6db4af9678a63c9d2461e33341d30`.
+- `ranker.json` keeps the training metadata, names the model
+  `dinov2s-linear-v2`, and records the previous artifact for rollback. The old
+  files remain in Git history.
+- Loading `models/ranker` through `Dinov2FitRanker` reproduces all 65 saved
+  validation margins from the 29 validation photos. The largest difference is
+  8.3e-7, all margin signs match, and display scores range from 55.9 to 85.0.
+- 108 inference tests passed, one skipped; Ruff passes.
+
+### Latency on webcam-sized input
+
+`latency-2000-640px-webp-default.json` resizes the 128 training photos to match
+the browser input: at most 640 px wide, with WebP quality set to 0.82. It times
+`score(bytes)` after 10 warm-ups, with three runs per image in alternating order
+and eight Torch threads. It does not include HTTP, garment detection, or
+concurrent requests.
+
+| Artifact | Median | p95 | p99 | Frames over 95 ms | Strict 95 ms p95 gate |
+|---|---:|---:|---:|---:|---|
+| Previous PCA-16 | 88.9 ms | 110.1 ms | 140.8 ms | 100/384 | Fail |
+| Current model | 89.2 ms | 117.4 ms | 145.0 ms | 103/384 | Fail |
+
+An earlier estimate suggested that smaller images would meet the target. This
+test shows that they do not. `latency-2000-format-diagnostic.txt` compares three
+input formats for 40 images in one process using eight threads:
+
+| Input | Median | p95 | Decode + preprocess median |
+|---|---:|---:|---:|
+| Original JPEG | 91.6 ms | 167.1 ms | 29.5 ms |
+| 640 px WebP | 90.4 ms | 135.2 ms | 30.6 ms |
+| 640 px JPEG | 78.4 ms | 118.7 ms | 16.3 ms |
+
+The encoder takes about 60 ms regardless of image size, and slow runs already
+exceed the p95 target. At 640 px, WebP decoding takes about 14 ms longer than
+JPEG. The same original images ran about 20 ms slower than they did on 2026-09-07,
+so only compare results from this run. The scripts are stored with the reports.
 
 ## Reproduction commands
 

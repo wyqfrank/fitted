@@ -253,23 +253,18 @@ Do not mix icon packs.
 
 ---
 
-## 9. Responsive Layout
+## 9. Layout
 
-Design desktop-first for the two-laptop hackathon experience, but maintain sane responsive behaviour.
+Design for the two-laptop demo at common laptop widths. Mobile and narrow screens
+are out of scope (see `docs/PRD.md` § 9).
 
 Battle layout:
 
 ```text
-desktop:
 Player 1 | VS | Player 2
-
-mobile:
-Player 1
-VS
-Player 2
 ```
 
-Use CSS grid/flex responsive classes rather than JavaScript window-size checks.
+Use CSS grid/flex classes rather than JavaScript window-size checks.
 
 Prefer:
 
@@ -277,7 +272,7 @@ Prefer:
 className="grid gap-4 lg:grid-cols-[1fr_auto_1fr]"
 ```
 
-Avoid fixed widths when a responsive constraint works better.
+Avoid fixed widths when a flexible layout constraint works better.
 
 ---
 
@@ -658,7 +653,6 @@ Before considering frontend work complete, verify:
 - buttons use shared variants
 - icons come from lucide-react
 - colours use existing tokens
-- responsive behaviour is sane
 - loading states exist
 - error states exist
 - camera/WebRTC state is clearly communicated
@@ -672,21 +666,24 @@ The priority is a polished, coherent hackathon product with a small and predicta
 
 ---
 
-## 26. PRD Progress Tracking
+## 26. Documentation
 
-`docs/PRD.md` is the source of truth for product scope and high-level specification, implementation, and verification status.
+Use each document for one purpose:
 
-Use its task-list checkboxes consistently:
+| Document | Holds |
+|---|---|
+| `docs/next-steps.md` | Outstanding work |
+| `docs/PRD.md` | Product requirements |
+| `docs/architecture.md` | Current architecture and key decisions |
+| `docs/specs/` | Detailed interfaces, algorithms, schemas, and test plans |
 
-- `[ ]` means incomplete, undecided, blocked, or not yet verified.
-- `[x]` means the exact stated outcome is complete and has been verified.
-- A proposal, design discussion, or written specification is not implemented work.
-- Do not check an implementation item merely because code exists; verify the behaviour described by the item.
-- When a change completes or invalidates a tracked item, update the relevant PRD checkbox in the same change.
-- When work is tracked in a focused Markdown file under `docs/specs/`, mark the respective task checkbox in that file in the same change.
-- If the same outcome is tracked in both the PRD and a focused specification, update both checkboxes; do not leave their completion states inconsistent.
-- Add new implementation or verification work as a Markdown task (`- [ ]`) in the most relevant tracking document, then change it to `- [x]` only after the exact outcome is complete and verified.
-- If an item is removed from scope, remove it or mark it explicitly as out of scope instead of checking it.
-- Preserve separate specification, implementation, and verification statuses when they do not complete at the same time.
+Rules:
 
-Keep the PRD focused on product requirements, major design decisions, and delivery status. When a subsystem needs extensive interfaces, algorithms, schemas, experiments, or test plans, place that detail in a focused document under `docs/specs/` and link it from the PRD. Do not create a separate specification document for routine or still-evolving details.
+- Track work as `- [ ]` in `docs/next-steps.md` only. Do not reintroduce status
+  checkboxes to the PRD or to the specs.
+- Use `[x]` only after the stated result has been implemented and verified.
+- Update the tracker in the same change that completes or removes an item.
+- If an item leaves scope, move it to the out-of-scope section rather than checking it.
+- When a decision is made, record it in `docs/architecture.md` with its rationale.
+- Keep extensive interfaces, algorithms, schemas, experiments and test plans in
+  `docs/specs/`, and link them rather than duplicating them.
